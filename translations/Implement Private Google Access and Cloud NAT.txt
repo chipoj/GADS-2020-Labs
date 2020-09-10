@@ -1,0 +1,215 @@
+#LAB:Implement Private Google Access and Cloud NAT
+
+## Objectives
+	In this lab, you learn how to perform the following tasks:
+
+	Configure a VM instance that doesn't have an external IP address
+	Connect to a VM instance using an Identity-Aware Proxy (IAP) tunnel
+	Enable Private Google Access on a subnet
+	Configure a Cloud NAT gateway
+	Verify access to public IP addresses of Google APIs and services and other connections to the internet
+
+##Steps:
+
+		
+
+TASK 1- Create the VM instance
+	1. Create VPC network called privatenet in custom mode
+
+		gcloud compute networks create privatenet \
+    		--subnet-mode=custom 
+
+   	2. Create a subnet in the Region us-central1 with an IP address range	10.130.0.0/20
+
+		gcloud compute networks subnets create privatenet-us \
+      		--network privatenet \
+     	 	--region us-central1 \
+      		--range 10.130.0.0/20
+
+	3. Create firewall rule
+
+		gcloud compute firewall-rules create privatenet-allow-ssh \
+   		--network privatenet \
+		--action allow \
+    		--source-ranges 35.235.240.0/20 \
+    		--rules tcp:80  \
+
+TASK 2- Create the VM instance with no public IP address
+	
+	1. Create VM instance
+
+		gcloud config set compute/region us-central1
+	
+		gcloud config set compute/zone us-central-c 
+		
+		gcloud compute instances create vm-internal --machine-type "n1-standard-1" \
+ 		--network privatenet \
+		--subnet privatenet-us	\
+		--no-address
+
+TASK 3- SSH to vm-internal to test the IAP tunnel
+
+	1. connect to vm-internal, run the following command:
+
+		gcloud compute ssh vm-internal --zone us-central1-c --tunnel-through-iap
+
+	2. If prompted about continuing, type Y.
+	3. When prompted for a passphrase, press ENTER.
+	4. When prompted for the same passphrase, press ENTER.
+	5.To test the external connectivity of vm-internal, run the following command:
+
+		ping -c 2 www.google.com
+
+	6. This should not work because vm-internal has no external IP address!
+
+	7. Wait for the ping command to complete.
+
+	8. To return to your Cloud Shell instance, run the following command:
+
+		exit
+
+
+		Task 2. Enable Private Google Access
+
+
+TASK 4- Create a Cloud Storage bucket
+
+	1. Create bucket with a unique global name and location type should be Multi-region 
+		 gsutil mb -l US gs://mybucketunique
+
+TASK 5- Copy an image file into your bucket
+
+	1. Copy an image from a public Cloud Storage bucket to your own bucket.
+
+	2. In Cloud Shell, run the following command, replacing [my_bucket] with your bucket's name:
+
+		gsutil cp gs://cloud-training/gcpnet/private/access.svg gs://mybucketunique
+
+	3. In the Cloud Console, click Refresh Bucket to verify that the image was copied.
+
+TASK 6- Access the image from your VM instance
+
+	1. In Cloud Shell, to try to copy the image from your bucket, run the following command, replacing [my_bucket] with your bucket's name:
+
+		gsutil cp gs://mybucketunique/*.svg .
+
+	2. This should work because Cloud Shell has an external IP address!
+
+	3. To connect to vm-internal, run the following command:
+
+		gcloud compute ssh vm-internal --zone us-central1-c --tunnel-through-iap
+
+	4. If prompted, type Y to continue.
+
+	5. To try to copy the image to vm-internal, run the following command, replacing [my_bucket] with your bucket's name:
+
+		gsutil cp gs://mybucketunique/*.svg .
+
+	6. This should not work: vm-internal can only send traffic within the VPC network because Private Google Access is disabled (by default).
+
+	7. Press Ctrl+C to stop the request.
+
+
+TASK 7- Enable Private Google Access
+
+	1. Enable Private Google access
+		gcloud compute networks subnets update privatenet-us \
+		--region=us-central1 \
+		--enable-private-ip-google-access
+
+	2. In Cloud Shell for vm-internal, to try to copy the image to vm-internal, run the following command, replacing [my_bucket] with your bucket's name:
+
+		gsutil cp gs://mybucketunique/*.svg .
+
+	3. This should work because vm-internal's subnet has Private Google Access enabled!
+
+	4. To return to your Cloud Shell instance, run the following command:
+
+		exit
+
+
+
+TASK 8- Try to update the VM instances
+
+	1. try to update the VM instances. In Cloud Shell, to try to re-synchronize the package index, run the following:
+
+		sudo apt-get update
+
+	2. The output should finish like this (do not copy; this is example output):
+
+		...
+		Reading package lists... Done
+
+	3. This should work because Cloud Shell has an external IP address!
+
+	4. To connect to vm-internal, run the following command:
+
+		gcloud compute ssh vm-internal --zone us-central1-c --tunnel-through-iap
+
+	5. If prompted, type Y to continue.
+
+	6. To try to re-synchronize the package index of vm-internal, run the following command:
+
+		sudo apt-get update
+
+	7. This should only work for Google Cloud packages because vm-internal only has access to Google APIs and services!
+
+		Press Ctrl+C to stop the request
+
+TASK 9- Configure a Cloud NAT gateway
+
+	1. Create a Cloud Router
+		gcloud compute routers create nat-router \
+    		--network privatenet\
+    		--region us-central1
+
+	2. Add a configuration to the router
+		gcloud compute routers nats create nat-config \
+    		--router-region us-central1 \
+    		--router nat-router \
+    		--nat-all-subnet-ip-ranges \
+   		--auto-allocate-nat-external-ips
+
+TASK 10- Verify the Cloud NAT gateway
+
+	1. It may take up to 3 minutes for the NAT configuration to propagate to the VM, so wait at least a minute before trying to access the internet again. In Cloud Shell for vm-internal, to try to re-synchronize the package index of vm-internal, run the following command:
+
+		sudo apt-get update
+
+	2. The output should finish like this (do not copy; this is example output):
+
+		...
+		Reading package lists... Done
+	3. This should work because vm-internal is using the NAT gateway!
+
+	4. To return to your Cloud Shell instance, run the following command:
+
+		exit
+
+TASK 11- Configure and view logs with Cloud NAT Logging
+
+	1. Enable monitoring
+		gcloud services enable monitoring
+
+	2. In Cloud Shell for vm-internal, to try to re-synchronize the package index of vm-internal, run the following command:
+
+		gcloud compute ssh vm-internal --zone us-central1-c --tunnel-through-iap
+
+	3. If prompted, type Y to continue.Try to re-synchronize the package index of vm-internal by running the following:
+
+		sudo apt-get update
+
+	4. The output should look like this (do not copy; this is example output):
+
+		...
+		Reading package lists... Done
+	5. To return to your Cloud Shell instance, run the following command:
+
+		exit
+
+		
+    
+
+
+
+
